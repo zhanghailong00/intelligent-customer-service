@@ -40,7 +40,7 @@ def chat(message, history):
 # 创建 Gradio 聊天界面（最简配置，兼容 Gradio 6.x）
 demo = gr.ChatInterface(
     fn=chat,
-    title="智科云联 - 实训设备智能客服",
+    title="实训设备智能客服",
     description="基于 RAG 的实训设备智能客服助手，可以回答环境搭建、设备使用、故障排查等问题。",
     examples=[
         "如何搭建实验环境？",

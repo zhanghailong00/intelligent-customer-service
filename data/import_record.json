@@ -1,0 +1,44 @@
+{
+  "imported_files": [
+    {
+      "filename": "实验箱前期准备工作\\02-实验环境的搭建.pdf",
+      "relative_path": "",
+      "file_path": "C:\\Users\\zhanghailong\\Desktop\\intelligent-customer-service\\data\\raw\\实验箱前期准备工作\\02-实验环境的搭建.pdf",
+      "file_mtime": "2026-05-21T16:22:26.044204",
+      "chunks_count": 3,
+      "status": "success",
+      "imported_at": "2026-05-21T16:49:02.440339",
+      "updated_at": "2026-05-21T16:49:02.440339"
+    },
+    {
+      "filename": "实验箱前期准备工作\\03-远程登录到实验平台.pdf",
+      "relative_path": "",
+      "file_path": "C:\\Users\\zhanghailong\\Desktop\\intelligent-customer-service\\data\\raw\\实验箱前期准备工作\\03-远程登录到实验平台.pdf",
+      "file_mtime": "2026-04-27T13:14:04.855685",
+      "chunks_count": 7,
+      "status": "success",
+      "imported_at": "2026-05-21T16:49:07.042276",
+      "updated_at": "2026-05-21T16:49:07.042276"
+    },
+    {
+      "filename": "实验箱前期准备工作\\04-上传下载文件到实验平台.pdf",
+      "relative_path": "",
+      "file_path": "C:\\Users\\zhanghailong\\Desktop\\intelligent-customer-service\\data\\raw\\实验箱前期准备工作\\04-上传下载文件到实验平台.pdf",
+      "file_mtime": "2026-04-27T13:14:02.996685",
+      "chunks_count": 4,
+      "status": "success",
+      "imported_at": "2026-05-21T16:49:11.434234",
+      "updated_at": "2026-05-21T16:49:11.434234"
+    },
+    {
+      "filename": "实验箱前期准备工作\\05-百度API接口申请.pdf",
+      "relative_path": "",
+      "file_path": "C:\\Users\\zhanghailong\\Desktop\\intelligent-customer-service\\data\\raw\\实验箱前期准备工作\\05-百度API接口申请.pdf",
+      "file_mtime": "2026-05-09T16:57:27.865433",
+      "chunks_count": 6,
+      "status": "success",
+      "imported_at": "2026-05-21T16:49:15.825794",
+      "updated_at": "2026-05-21T16:49:15.825794"
+    }
+  ]
+}

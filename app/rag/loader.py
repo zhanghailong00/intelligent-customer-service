@@ -1,6 +1,11 @@
 """
 文档加载模块
 负责加载 Markdown 文档，按标题层级切分，提取元数据
+
+source 格式说明：
+使用相对于 data/processed/ 的完整路径（含子目录），
+例如 "实验箱前期准备工作\\01-实验前准备\\01-实验前准备.md"
+确保不同子目录下同名文件的 source 全局唯一。
 """
 import os
 import re
@@ -142,8 +147,15 @@ def load_and_split(file_path: str) -> List[Dict]:
 
     Returns:
         切分后的 chunk 列表
+
+    注意：source 使用相对于 data/processed/ 的完整路径（含子目录），
+    例如 "实验箱前期准备工作\\01-实验前准备.md"，确保全局唯一，
+    避免不同子目录下同名文件的向量数据互相覆盖。
     """
-    source_file = os.path.basename(file_path)
+    # 使用相对于 processed 目录的路径作为 source，确保全局唯一
+    # 例如："实验箱前期准备工作\\01-实验前准备.md"
+    processed_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "processed")
+    source_file = os.path.relpath(file_path, processed_dir).replace("/", "\\")
     content = load_markdown(file_path)
     chunks = split_by_headers(content, source_file)
     return chunks

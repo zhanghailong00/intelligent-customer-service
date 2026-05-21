@@ -101,7 +101,11 @@ def add_documents(chunks: List[Dict]) -> int:
     print(f"向量化完成，向量维度: {len(embeddings[0])}")
 
     # 3. 准备 ChromaDB 数据
-    ids = [f"chunk_{i:04d}" for i in range(len(chunks))]
+    # 使用 source 完整路径作为 ID 前缀，确保全局唯一
+    # 例如：实验箱前期准备工作\01-实验前准备\01-实验前准备_chunk_0000
+    source = chunks[0]['metadata'].get('source', 'unknown') if chunks else 'unknown'
+    source_name = os.path.splitext(source)[0]  # 去掉扩展名
+    ids = [f"{source_name}_chunk_{i:04d}" for i in range(len(chunks))]
     documents = texts
     metadatas = [chunk['metadata'] for chunk in chunks]
 
@@ -109,10 +113,21 @@ def add_documents(chunks: List[Dict]) -> int:
     print("存入 ChromaDB...")
     client, collection = get_vectorstore()
 
-    # 清空旧数据（如果需要）
-    # collection.delete(where={})
+    # 5. 删除该文件的旧数据（如果存在）
+    # 使用 where 条件删除同一来源的旧 chunk
+    try:
+        old_count = collection.count()
+        if old_count > 0:
+            # 删除同一 source 的旧数据
+            collection.delete(where={"source": source})
+            deleted_count = old_count - collection.count()
+            if deleted_count > 0:
+                print(f"删除旧数据：{deleted_count} 个 chunk")
+    except Exception as e:
+        # 如果删除失败（比如 where 条件不支持），忽略
+        pass
 
-    # 批量插入
+    # 6. 批量插入新数据
     collection.add(
         ids=ids,
         embeddings=embeddings,
