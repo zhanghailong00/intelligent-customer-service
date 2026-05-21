@@ -5,8 +5,11 @@
 import os
 from dotenv import load_dotenv
 
+# 项目根目录（config.py 的上两级目录）
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # 加载 .env 文件中的环境变量
-load_dotenv()
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 # ==================== DeepSeek LLM 配置 ====================
 # DeepSeek API 密钥，用于调用大语言模型
@@ -23,8 +26,8 @@ QWEN_API_KEY = os.getenv("QWEN_API_KEY")
 QWEN_EMBEDDING_MODEL = "tongyi-embedding-vision-flash-2026-03-06"
 
 # ==================== ChromaDB 向量数据库配置 ====================
-# 向量数据库持久化存储目录
-CHROMA_PERSIST_DIR = "./chroma_db"
+# 向量数据库持久化存储目录（使用绝对路径，确保在任何目录运行都能找到）
+CHROMA_PERSIST_DIR = os.path.join(PROJECT_ROOT, "chroma_db")
 # 向量数据库集合名称
 CHROMA_COLLECTION_NAME = "knowledge_base"
 
