@@ -78,18 +78,33 @@
 ### 3.2 数据处理流程
 
 ```
-实验手册（PDF/图片）
+原始资料（PDF/Word/图片）
     ↓
-技术人员提供的描述文档（文字）
+转换为 Markdown 格式（统一格式，保留结构）
     ↓
-文档切分（按问题/步骤/模块切分）
+文档切分（按标题/步骤/模块切分）
     ↓
 向量化 → 存入 ChromaDB
     ↓
-同时记录：原图路径、页码、来源
+同时记录：图片路径、章节编号、来源
     ↓
-用户查询时 → 返回文字 + 原图链接
+用户查询时 → 返回文字 + 图片
 ```
+
+**为什么选择 Markdown 格式？**
+
+| 原因 | 说明 |
+|---|---|
+| 结构清晰 | 标题层级明确，易于切分 |
+| 图片支持 | 用 `![](path)` 引用图片，前端直接显示 |
+| 解析简单 | 比 PDF/Word 更容易程序化处理 |
+| 版本友好 | Git diff 可读，便于协作 |
+| 格式统一 | 所有资料转为同一种格式，降低处理复杂度 |
+
+**资料处理要求**：
+- 所有产品手册、实验指导书等资料必须先转为 Markdown 格式
+- 图片保存到 `knowledge/images/` 目录，Markdown 中用相对路径引用
+- 保留原始标题层级（# ## ### ####），便于切分
 
 ---
 
@@ -132,12 +147,21 @@
 
 ### 4.4 文档处理
 
+**文档格式要求**：所有资料必须先转换为 Markdown 格式
+
 | 工具 | 用途 |
 |---|---|
-| LangChain TextLoader | 加载 TXT/Markdown |
-| PyPDFLoader | 加载 PDF |
-| RecursiveCharacterTextSplitter | 文档切分 |
-| PaddleOCR | 提取图片中的文字标签 |
+| LangChain TextLoader | 加载 Markdown 文档 |
+| MarkdownHeaderTextSplitter | 按标题层级切分 |
+| RecursiveCharacterTextSplitter | 按步骤/段落切分 |
+| PyMuPDF | 从 PDF 提取图片（转换时使用） |
+
+**转换流程**：
+```
+PDF/Word → Markdown（人工或工具转换）
+         → 图片提取到 knowledge/images/
+         → Markdown 中用相对路径引用图片
+```
 
 ### 4.5 前端
 
@@ -149,15 +173,27 @@
 ### 4.6 核心依赖
 
 ```
-langchain>=0.2
-langgraph>=0.2
-langchain-community
-langchain-openai
+# LangChain v1.0
+langchain-core>=1.0
+langchain-openai>=1.0
+langgraph>=1.0
+
+# 向量数据库
 chromadb
+
+# Web 框架
 fastapi
 uvicorn
 gradio
-pypdf
+
+# 文档处理
+pymupdf          # PDF 图片提取
+
+# AI 服务
+dashscope        # 通义千问 Embedding
+openai           # DeepSeek API（兼容 OpenAI）
+
+# 工具
 loguru
 python-dotenv
 ```
@@ -207,10 +243,12 @@ smart-service/
 │       └── models.py         # SQLite 数据模型
 ├── web/
 │   └── app.py                # Gradio 界面
-├── knowledge/                # 知识库文档存放
-│   ├── products/             # 产品手册
-│   ├── faq/                  # 常见问题
-│   └── training/             # 培训资料
+├── knowledge/                # 知识库文档存放（Markdown 格式）
+│   ├── products/             # 产品手册（.md 文件）
+│   ├── faq/                  # 常见问题（.md 文件）
+│   ├── training/             # 培训资料（.md 文件）
+│   └── images/               # 图片文件（从 PDF 提取）
+├── tests/
 ├── tests/
 ├── docker/
 │   ├── Dockerfile
@@ -579,7 +617,7 @@ class State(TypedDict):
 - 开发知识库管理后台，支持非技术人员通过 Web 界面动态更新知识库内容
 
 ### 技术栈
-Python / LangChain / LangGraph / FastAPI / ChromaDB / Gradio / DeepSeek API / 通义千问 Embedding / SQLite
+Python / LangChain v1.0 / LangGraph / FastAPI / ChromaDB / Gradio / DeepSeek API / 通义千问 Embedding (dashscope) / SQLite
 
 ---
 

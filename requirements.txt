@@ -10,3 +10,4 @@ loguru
 python-dotenv
 openai
 requests
+dashscope

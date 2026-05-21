@@ -1,17 +1,39 @@
+# 环境配置文件（包含 API Key）
 .env
 .env.local
 .env.production
+
+# Python 缓存
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
+
+# IDE 配置
 .vscode/
 .idea/
+
+# 向量数据库
 chroma_db/
 *.db
+
+# 图片文件
 images/
 *.png
 *.jpg
 *.jpeg
+
+# 原始 PDF 文件
 02-实验环境的搭建.pdf
+data/raw/
+
+# 处理后的文件
+data/processed/
+
+# 日志文件
+*.log
+
+# 临时文件
+*.tmp
+*.swp
