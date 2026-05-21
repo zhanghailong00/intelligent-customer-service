@@ -1,0 +1,12 @@
+langchain-core>=1.0
+langchain-openai>=1.0
+langgraph>=1.0
+chromadb
+fastapi
+uvicorn
+gradio
+pypdf
+loguru
+python-dotenv
+openai
+requests
