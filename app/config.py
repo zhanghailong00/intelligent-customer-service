@@ -11,13 +11,29 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 加载 .env 文件中的环境变量
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
-# ==================== DeepSeek LLM 配置 ====================
+# ==================== DeepSeek LLM 配置（主模型） ====================
 # DeepSeek API 密钥，用于调用大语言模型
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 # DeepSeek API 基础地址
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 # 使用的模型名称
 DEEPSEEK_MODEL = "deepseek-chat"
+
+# ==================== 通义千问 LLM 配置（备用模型） ====================
+# 通义千问 API 密钥（复用 Embedding 的 Key）
+QWEN_LLM_API_KEY = os.getenv("QWEN_API_KEY")
+# 通义千问 LLM 基础地址（OpenAI 兼容接口）
+QWEN_LLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# 通义千问 LLM 模型名称
+QWEN_LLM_MODEL = "qwen-plus"
+
+# ==================== LLM Fallback 配置 ====================
+# 主模型调用超时时间（秒）
+LLM_PRIMARY_TIMEOUT = 30
+# 备用模型调用超时时间（秒）
+LLM_FALLBACK_TIMEOUT = 60
+# 是否启用 Fallback 机制
+LLM_FALLBACK_ENABLED = True
 
 # ==================== 通义千问 Embedding 配置 ====================
 # 通义千问 API 密钥，用于文本向量化
