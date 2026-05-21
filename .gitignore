@@ -31,6 +31,9 @@ data/raw/
 # 处理后的文件
 data/processed/
 
+# 导入记录（包含本地文件路径）
+data/import_record.json
+
 # 日志文件
 *.log
 
