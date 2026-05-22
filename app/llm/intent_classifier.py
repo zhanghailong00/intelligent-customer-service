@@ -26,29 +26,36 @@ INTENT_UNKNOWN = "unknown"      # 无法识别
 # 置信度阈值，低于此值视为无法识别
 CONFIDENCE_THRESHOLD = 0.6
 
-# 意图分类 Prompt
+# 意图分类 Prompt（少样本提示）
 INTENT_CLASSIFY_PROMPT = """你是一个智能客服系统的意图分类器。根据用户的问题，判断其意图属于以下哪一类：
 
-1. **product**（产品咨询）：询问产品功能、参数、使用方法、规格说明等
-   - 示例："这个箱子有什么功能？"、"支持哪些传感器？"、"怎么连接WiFi？"
-
-2. **fault**（故障排查）：设备故障、报错、异常、无法正常使用等
-   - 示例："传感器不亮了"、"连不上网"、"报错了怎么办"、"屏幕没反应"
-
-3. **training**（培训指导）：教学资料、实验指导、课件、培训相关
-   - 示例："有课件吗？"、"怎么做实验？"、"有教学视频吗？"
-
+1. **product**（产品咨询）：产品功能、参数、使用方法、规格说明
+2. **fault**（故障排查）：设备故障、报错、异常、无法正常使用
+3. **training**（培训指导）：教学资料、实验指导、课件、实验相关
 4. **greeting**（打招呼）：问候、打招呼、自我介绍等非问题类输入
-   - 示例："你好"、"你是谁"、"早上好"、"在吗"、"hi"
 
-请根据用户的问题，输出 JSON 格式的分类结果：
+分类示例：
+- "这个箱子有什么功能？" → {"intent": "product", "confidence": 0.95}
+- "支持哪些传感器？" → {"intent": "product", "confidence": 0.9}
+- "怎么连接WiFi？" → {"intent": "product", "confidence": 0.85}
+- "传感器不亮了" → {"intent": "fault", "confidence": 0.9}
+- "连不上网怎么办" → {"intent": "fault", "confidence": 0.85}
+- "屏幕报错了" → {"intent": "fault", "confidence": 0.9}
+- "有课件吗？" → {"intent": "training", "confidence": 0.9}
+- "怎么做实验？" → {"intent": "training", "confidence": 0.85}
+- "有教学视频吗？" → {"intent": "training", "confidence": 0.9}
+- "你好" → {"intent": "greeting", "confidence": 0.95}
+- "你是谁" → {"intent": "greeting", "confidence": 0.9}
+- "早上好" → {"intent": "greeting", "confidence": 0.95}
 
+边界判断规则：
+- 涉及"实验/课件/教学/培训" → training
+- 涉及"故障/报错/不亮/坏了/连不上" → fault
+- 涉及"功能/参数/怎么用/规格/支持" → product
+- 与实训设备完全无关的问题 → confidence < 0.5
+
+输出格式（只输出 JSON，不要输出其他内容）：
 {"intent": "product/fault/training/greeting", "confidence": 0.0-1.0}
-
-注意：
-- 只输出 JSON，不要输出其他内容
-- confidence 表示你对分类结果的确信程度（0-1）
-- 如果无法明确判断，confidence 设为 0.5 以下
 """
 
 

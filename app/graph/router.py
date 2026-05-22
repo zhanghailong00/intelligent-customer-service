@@ -87,9 +87,10 @@ def route(user_query: str) -> Dict[str, any]:
     agent = _agents[intent]
     result = agent.run(user_query)
 
-    # 5. 补充意图信息
+    # 5. 补充意图信息和 Agent 身份
     result["intent"] = intent
     result["intent_label"] = get_intent_label(intent)
     result["confidence"] = confidence
+    result["role_name"] = agent.role_name
 
     return result

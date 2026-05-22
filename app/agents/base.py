@@ -20,6 +20,7 @@ class BaseAgent:
 
     # 子类必须覆写
     name: str = "base"
+    role_name: str = "助手"  # 用于 UI 显示的角色名称
     system_prompt: str = "你是一个智能客服助手。"
 
     def __init__(self):
