@@ -65,11 +65,15 @@ def classifier_node(state: State) -> dict:
     """
     # 从 messages 中获取最新的用户消息
     messages = state["messages"]
-    # messages 是 [{"role": "user", "content": "..."}, ...] 格式
-    # 取最后一条用户消息
+    # 兼容 LangChain HumanMessage 对象和字典格式
     user_message = ""
     for msg in reversed(messages):
-        if msg.get("role") == "user":
+        # LangChain HumanMessage 对象
+        if hasattr(msg, "type") and msg.type == "human":
+            user_message = msg.content
+            break
+        # 字典格式
+        elif isinstance(msg, dict) and msg.get("role") == "user":
             user_message = msg["content"]
             break
 
@@ -236,6 +240,10 @@ def _get_last_user_message(state: State) -> str:
     """
     从 State 中提取最新的用户消息
 
+    兼容两种消息格式：
+    - 字典格式：{"role": "user", "content": "..."}
+    - LangChain 对象：HumanMessage(content="...")
+
     Args:
         state: 当前对话状态
 
@@ -244,7 +252,11 @@ def _get_last_user_message(state: State) -> str:
     """
     messages = state.get("messages", [])
     for msg in reversed(messages):
-        if msg.get("role") == "user":
+        # 兼容 LangChain HumanMessage 对象
+        if hasattr(msg, "type") and msg.type == "human":
+            return msg.content
+        # 兼容字典格式
+        elif isinstance(msg, dict) and msg.get("role") == "user":
             return msg["content"]
     return ""
 
