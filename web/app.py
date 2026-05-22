@@ -1,6 +1,6 @@
 """
 Gradio 界面模块
-提供简单的聊天界面，直接调用 RAG 问答链
+提供简单的聊天界面，直接调用 LangGraph 状态图
 启动命令：python web/app.py
 """
 import os
@@ -10,29 +10,49 @@ import sys
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
+import traceback
 import gradio as gr
-from app.graph.router import route
+from app.graph.builder import get_graph
+from app.llm.intent_classifier import get_intent_label
 
 
 def chat(message, history):
     """
-    聊天函数，调用多 Agent 路由获取回复
+    聊天函数，调用 LangGraph 状态图获取回复
 
-    流程：意图分类 → 选择 Agent → 检索 → 生成回答
+    流程：构建消息历史 → LangGraph（意图分类 → Agent 执行） → 格式化输出
 
     Args:
         message: 用户输入的消息
-        history: 对话历史（Gradio 自动管理）
+        history: 对话历史（Gradio 自动管理，格式：[["user", "assistant"], ...]）
 
     Returns:
         格式化的回答（包含参考来源和意图信息）
     """
     try:
-        # 调用多 Agent 路由
-        result = route(message)
+        # 1. 获取 LangGraph 状态图
+        graph = get_graph()
 
-        # 格式化输出
-        response = result["answer"]
+        # 2. 将 Gradio history 转换为 LangGraph messages 格式
+        messages = _convert_history(history)
+        messages.append({"role": "user", "content": message})
+
+        print(f"[Gradio] 收到消息：{message}")
+        print(f"[Gradio] 历史消息数：{len(messages)}")
+
+        # 3. 调用 LangGraph
+        result = graph.invoke({
+            "messages": messages,
+            "intent": "",
+            "confidence": 0.0,
+            "role_name": "",
+            "answer": "",
+            "sources": [],
+            "hitl_required": False
+        })
+
+        # 4. 格式化输出
+        response = result.get("answer", "")
 
         # 添加参考来源
         if result.get("sources"):
@@ -42,7 +62,8 @@ def chat(message, history):
 
         # 添加 Agent 身份标签和意图信息
         role_name = result.get("role_name", "")
-        intent_label = result.get("intent_label", "未知")
+        intent = result.get("intent", "")
+        intent_label = get_intent_label(intent) if intent else "未知"
         confidence = result.get("confidence", 0)
         if role_name:
             response += f"\n\n_[{role_name} | 意图：{intent_label}，置信度：{confidence:.0%}]_"
@@ -51,7 +72,41 @@ def chat(message, history):
 
         return response
     except Exception as e:
+        # 打印完整错误堆栈到终端，方便调试
+        print(f"[Gradio] 错误：{type(e).__name__}: {e}")
+        traceback.print_exc()
         return f"错误：{str(e)}\n\n请检查 API 配置是否正确。"
+
+
+def _convert_history(history):
+    """
+    将 Gradio history 转换为 LangGraph messages 格式
+
+    Gradio 5.x 格式：[["user msg", "assistant msg"], ...]
+    Gradio 6.x 格式：[{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}, ...]
+    LangGraph 格式：[{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}, ...]
+
+    Args:
+        history: Gradio 的对话历史
+
+    Returns:
+        LangGraph 兼容的消息列表
+    """
+    messages = []
+    for item in history:
+        # Gradio 6.x：字典格式 {"role": "user", "content": "..."}
+        if isinstance(item, dict):
+            role = item.get("role", "")
+            content = item.get("content", "")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+        # Gradio 5.x：列表格式 ["user msg", "assistant msg"]
+        elif isinstance(item, (list, tuple)) and len(item) >= 2:
+            if item[0]:
+                messages.append({"role": "user", "content": item[0]})
+            if item[1]:
+                messages.append({"role": "assistant", "content": item[1]})
+    return messages
 
 
 # 创建 Gradio 聊天界面（最简配置，兼容 Gradio 6.x）
