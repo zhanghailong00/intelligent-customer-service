@@ -20,6 +20,7 @@ from app.llm.models import chat
 INTENT_PRODUCT = "product"      # 产品咨询
 INTENT_FAULT = "fault"          # 故障排查
 INTENT_TRAINING = "training"    # 培训指导
+INTENT_GREETING = "greeting"    # 打招呼/闲聊
 INTENT_UNKNOWN = "unknown"      # 无法识别
 
 # 置信度阈值，低于此值视为无法识别
@@ -37,9 +38,12 @@ INTENT_CLASSIFY_PROMPT = """你是一个智能客服系统的意图分类器。�
 3. **training**（培训指导）：教学资料、实验指导、课件、培训相关
    - 示例："有课件吗？"、"怎么做实验？"、"有教学视频吗？"
 
+4. **greeting**（打招呼）：问候、打招呼、自我介绍等非问题类输入
+   - 示例："你好"、"你是谁"、"早上好"、"在吗"、"hi"
+
 请根据用户的问题，输出 JSON 格式的分类结果：
 
-{"intent": "product/fault/training", "confidence": 0.0-1.0}
+{"intent": "product/fault/training/greeting", "confidence": 0.0-1.0}
 
 注意：
 - 只输出 JSON，不要输出其他内容
@@ -111,7 +115,7 @@ def _parse_intent_response(response: str) -> Dict[str, any]:
             confidence = float(data.get("confidence", 0.0))
 
             # 验证 intent 值
-            valid_intents = [INTENT_PRODUCT, INTENT_FAULT, INTENT_TRAINING]
+            valid_intents = [INTENT_PRODUCT, INTENT_FAULT, INTENT_TRAINING, INTENT_GREETING]
             if intent not in valid_intents:
                 intent = INTENT_UNKNOWN
                 confidence = 0.0
@@ -144,6 +148,7 @@ def get_intent_label(intent: str) -> str:
         INTENT_PRODUCT: "产品咨询",
         INTENT_FAULT: "故障排查",
         INTENT_TRAINING: "培训指导",
+        INTENT_GREETING: "打招呼",
         INTENT_UNKNOWN: "其他问题"
     }
     return labels.get(intent, "未知")
@@ -155,6 +160,8 @@ if __name__ == "__main__":
         "这个箱子有什么功能？",
         "传感器不亮了",
         "有课件吗？",
+        "你好",
+        "你是谁",
         "今天天气怎么样？",
         "怎么连接WiFi？",
         "报错了怎么办？",
