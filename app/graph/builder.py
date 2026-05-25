@@ -6,18 +6,20 @@ LangGraph 图构建
 - 定义节点和边的连接关系
 - 编译生成可执行的 graph
 
-状态图结构：
+状态图结构（Phase 5 HITL 后）：
     start → classifier_node →
-      ├── greeting_node → end
-      ├── unknown_node → end
-      ├── product_agent_node → end
-      ├── fault_agent_node → end
-      └── training_agent_node → end
+      ├── greeting_node → END
+      ├── unknown_node → END
+      ├── product_agent_node → hitl_checker_node → END
+      ├── fault_agent_node   → hitl_checker_node → END
+      └── training_agent_node → hitl_checker_node → END
 
 设计思路：
 - classifier_node 是唯一的入口节点，负责意图分类
 - 通过条件边（conditional_edges）根据 intent 路由到不同节点
 - 每个 Agent 节点独立，方便后续扩展不同逻辑
+- Agent 回答后经过 hitl_checker 检测，决定是否需要人工介入
+- greeting/unknown 不需要 HITL 检测，直接到 END
 """
 from langgraph.graph import StateGraph, END
 from app.graph.state import State
@@ -28,6 +30,7 @@ from app.graph.nodes import (
     product_agent_node,
     fault_agent_node,
     training_agent_node,
+    hitl_checker_node,
     route_by_intent
 )
 
@@ -49,6 +52,7 @@ def build_graph() -> StateGraph:
     graph.add_node("product_agent_node", product_agent_node)
     graph.add_node("fault_agent_node", fault_agent_node)
     graph.add_node("training_agent_node", training_agent_node)
+    graph.add_node("hitl_checker_node", hitl_checker_node)
 
     # 3. 设置入口节点
     graph.set_entry_point("classifier_node")
@@ -66,12 +70,19 @@ def build_graph() -> StateGraph:
         }
     )
 
-    # 5. 添加普通边：每个节点执行完后结束
+    # 5. 添加普通边
+    # greeting/unknown 直接结束（不需要 HITL 检测）
     graph.add_edge("greeting_node", END)
     graph.add_edge("unknown_node", END)
-    graph.add_edge("product_agent_node", END)
-    graph.add_edge("fault_agent_node", END)
-    graph.add_edge("training_agent_node", END)
+
+    # Agent 节点执行完后，进入 HITL 检测节点
+    graph.add_edge("product_agent_node", "hitl_checker_node")
+    graph.add_edge("fault_agent_node", "hitl_checker_node")
+    graph.add_edge("training_agent_node", "hitl_checker_node")
+
+    # HITL 检测节点执行完后结束
+    # （如果需要人工介入，hitl_checker_node 内部会调用 interrupt() 暂停图）
+    graph.add_edge("hitl_checker_node", END)
 
     # 6. 编译图
     compiled_graph = graph.compile()

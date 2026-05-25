@@ -13,8 +13,10 @@ LangGraph 节点函数
 - product_agent_node: 调用产品知识 Agent
 - fault_agent_node: 调用故障排查 Agent
 - training_agent_node: 调用培训资料 Agent
+- hitl_checker_node: 检测是否需要人工介入
 """
 from app.graph.state import State
+from app.graph.hitl.detector import should_escalate_to_human
 from app.llm.intent_classifier import (
     classify_intent,
     get_intent_label,
@@ -234,6 +236,63 @@ def training_agent_node(state: State) -> dict:
         "answer": result["answer"],
         "sources": result["sources"]
     }
+
+
+def hitl_checker_node(state: State) -> dict:
+    """
+    HITL 检测节点
+
+    功能：
+    - Agent 执行完后，检查是否需要人工介入
+    - 如果需要，调用 interrupt() 暂停图执行，等待人工输入
+    - 如果不需要，继续到 END
+
+    检测条件：
+    1. Agent 拒绝（回复包含拒绝关键词）
+    2. 用户主动要求转人工（说"转人工"）
+    3. 置信度低（confidence < 0.5）
+
+    Args:
+        state: 当前对话状态
+
+    Returns:
+        更新后的状态字段
+    """
+    # 获取需要的信息
+    answer = state.get("answer", "")
+    messages = state.get("messages", [])
+    confidence = state.get("confidence", 1.0)
+    user_query = _get_last_user_message(state)
+
+    # 综合判断是否需要转人工
+    result = should_escalate_to_human(
+        answer=answer,
+        messages=messages,
+        confidence=confidence,
+        user_query=user_query
+    )
+
+    if result["needs_human"]:
+        print(f"[HITL] 需要人工介入，原因：{result['reason']}")
+        # 调用 interrupt() 暂停图执行，等待人工输入
+        # interrupt() 会返回人工审核后的内容
+        from langgraph.types import interrupt
+        human_response = interrupt({
+            "reason": result["reason"],
+            "original_answer": answer,
+            "message": f"您的问题需要人工客服处理（原因：{result['reason']}）"
+        })
+
+        # 人工输入后，用人工的回答替换原来的回答
+        return {
+            "answer": human_response,
+            "hitl_required": True
+        }
+    else:
+        print(f"[HITL] 不需要人工介入")
+        return {
+            "hitl_required": False
+        }
 
 
 def _get_last_user_message(state: State) -> str:
