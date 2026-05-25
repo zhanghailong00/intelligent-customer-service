@@ -22,6 +22,7 @@ LangGraph 图构建
 - greeting/unknown 不需要 HITL 检测，直接到 END
 """
 from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.memory import MemorySaver
 from app.graph.state import State
 from app.graph.nodes import (
     classifier_node,
@@ -35,9 +36,12 @@ from app.graph.nodes import (
 )
 
 
-def build_graph() -> StateGraph:
+def build_graph(checkpointer=None) -> StateGraph:
     """
     构建 LangGraph 状态图
+
+    Args:
+        checkpointer: 状态持久化器，HITL interrupt 需要配置 MemorySaver
 
     Returns:
         编译后的 StateGraph，可以直接调用 graph.invoke()
@@ -84,8 +88,8 @@ def build_graph() -> StateGraph:
     # （如果需要人工介入，hitl_checker_node 内部会调用 interrupt() 暂停图）
     graph.add_edge("hitl_checker_node", END)
 
-    # 6. 编译图
-    compiled_graph = graph.compile()
+    # 6. 编译图（传入 checkpointer 支持 interrupt 暂停/恢复）
+    compiled_graph = graph.compile(checkpointer=checkpointer)
 
     print("[LangGraph] 状态图构建完成")
     return compiled_graph
@@ -99,10 +103,14 @@ def get_graph() -> StateGraph:
     """
     获取编译后的 LangGraph（单例模式）
 
+    使用 MemorySaver 作为 checkpointer，支持 interrupt 暂停/恢复（HITL 机制）
+
     Returns:
         编译后的 StateGraph
     """
     global _graph
     if _graph is None:
-        _graph = build_graph()
+        # 创建 MemorySaver 作为 checkpointer，支持 HITL interrupt
+        _checkpointer = MemorySaver()
+        _graph = build_graph(checkpointer=_checkpointer)
     return _graph
