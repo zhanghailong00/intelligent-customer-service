@@ -14,11 +14,13 @@ import traceback
 import gradio as gr
 from app.graph.builder import get_graph
 from app.llm.intent_classifier import get_intent_label
-from langgraph.errors import Interrupt
 from langgraph.types import Command
+from app.hitl.handoff import generate_snapshot, format_snapshot_display
+from app.hitl.detector import check_agent_refusal, check_low_confidence, check_sensitive_content
 
 # HITL 状态管理：记录待处理的 interrupt（简化版，单用户开发环境适用）
 _pending_interrupt = None
+_hitl_active = False  # HITL 是否激活（人工客服接管中）
 
 
 def chat(message, history):
@@ -26,10 +28,9 @@ def chat(message, history):
     聊天函数，调用 LangGraph 状态图获取回复
 
     流程：
-    1. 构建消息历史
-    2. LangGraph（意图分类 → Agent 执行 → HITL 检测）
-    3. 如果触发 interrupt（需要人工介入），显示提示并等待用户回复
-    4. 格式化输出
+    1. 如果 HITL 激活中 → 用户输入作为人工客服回复直接显示
+    2. 如果 HITL 未激活 → 正常调用 LangGraph
+    3. 如果触发 HITL → 显示快照，等待人工回复
 
     Args:
         message: 用户输入的消息
@@ -38,26 +39,21 @@ def chat(message, history):
     Returns:
         格式化的回答
     """
-    global _pending_interrupt
+    global _pending_interrupt, _hitl_active
 
     try:
-        # 1. 获取 LangGraph 状态图
-        graph = get_graph()
+        # 1. HITL 激活中：所有消息作为人工客服回复，直到人工说"关闭"
+        if _hitl_active:
+            print(f"[Gradio] 人工客服回复：{message}")
+            # 人工说"关闭" → 退出 HITL 模式，恢复 AI
+            if message.strip() in ["关闭", "结束", "退出", "close"]:
+                _hitl_active = False
+                _pending_interrupt = None
+                return "✅ 已退出人工客服模式，AI 客服继续为您服务。"
+            return f"**[人工客服]** {message}"
 
-        # 2. 如果有待处理的 interrupt，用用户输入恢复图执行
-        if _pending_interrupt is not None:
-            print(f"[Gradio] 恢复 HITL，人工回复：{message}")
-            try:
-                result = graph.invoke(
-                    Command(resume=message),
-                    config=_pending_interrupt["config"]
-                )
-                _pending_interrupt = None
-                return _format_response(result)
-            except Exception as resume_error:
-                print(f"[Gradio] HITL 恢复失败：{resume_error}")
-                _pending_interrupt = None
-                return f"HITL 恢复失败：{str(resume_error)}"
+        # 2. 获取 LangGraph 状态图
+        graph = get_graph()
 
         # 3. 正常流程：构建消息历史
         messages = _convert_history(history)
@@ -68,39 +64,56 @@ def chat(message, history):
 
         # 4. 调用 LangGraph
         config = {"configurable": {"thread_id": "default"}}
-        try:
-            result = graph.invoke(
-                {
-                    "messages": messages,
-                    "intent": "",
-                    "confidence": 0.0,
-                    "role_name": "",
-                    "answer": "",
-                    "sources": [],
-                    "hitl_required": False
-                },
-                config=config
+        result = graph.invoke(
+            {
+                "messages": messages,
+                "intent": "",
+                "confidence": 0.0,
+                "role_name": "",
+                "answer": "",
+                "sources": [],
+                "hitl_required": False
+            },
+            config=config
+        )
+
+        # 5. 在前端层检测 HITL（LangGraph interrupt 后 state 不更新，需手动检测）
+        answer = result.get("answer", "")
+        confidence = result.get("confidence", 1.0)
+        messages_list = result.get("messages", [])
+
+        hitl_reason = None
+        if check_agent_refusal(answer):
+            hitl_reason = "Agent 拒绝回答"
+        elif check_low_confidence(confidence):
+            hitl_reason = "置信度低"
+        elif check_sensitive_content(answer):
+            hitl_reason = "敏感问题"
+
+        if hitl_reason:
+            print(f"[Gradio] HITL 触发（前端检测），原因：{hitl_reason}")
+
+            # 生成会话快照
+            snapshot = generate_snapshot(
+                messages=messages_list,
+                answer=answer,
+                sources=result.get("sources", []),
+                hitl_reason=hitl_reason,
+                confidence=confidence
             )
-        except Interrupt as e:
-            # 触发 HITL interrupt，图执行暂停
-            interrupt_value = e.args[0] if e.args else {}
-            reason = interrupt_value.get("reason", "未知原因")
-            original_answer = interrupt_value.get("original_answer", "")
 
-            print(f"[Gradio] HITL 触发，原因：{reason}")
+            # 激活 HITL 模式，等待人工回复
+            _hitl_active = True
 
-            # 保存 interrupt 状态，等待用户回复
-            _pending_interrupt = {"config": config}
-
-            # 返回格式化的转人工提示
-            response = f"⏳ **需要人工介入**\n\n"
-            if original_answer:
-                response += f"AI 原始回答：{original_answer}\n\n"
-            response += f"**转人工原因**：{reason}\n\n"
-            response += "---\n请直接输入您的回复，系统将用您的输入替代 AI 回答。"
+            # 返回格式化的转人工提示（含会话快照）
+            response = "⏳ **需要人工介入**\n\n"
+            response += "正在为您转接人工客服，请稍候...\n\n"
+            response += format_snapshot_display(snapshot) + "\n\n"
+            response += "请描述您的问题，人工客服将为您处理。\n\n"
+            response += "_（人工客服输入「关闭」可退出人工模式，恢复 AI 服务）_"
             return response
 
-        # 5. 格式化输出
+        # 6. 正常输出
         return _format_response(result)
 
     except Exception as e:
@@ -127,10 +140,6 @@ def _format_response(result):
         response += "\n\n---\n**参考来源：**\n"
         for i, source in enumerate(result["sources"], 1):
             response += f"{i}. {source}\n"
-
-    # 添加 HITL 标记
-    if result.get("hitl_required"):
-        response += "\n\n_[人工介入处理]_"
 
     # 添加 Agent 身份标签和意图信息
     role_name = result.get("role_name", "")

@@ -267,8 +267,10 @@ def hitl_checker_node(state: State) -> dict:
 
     检测条件：
     1. Agent 拒绝（回复包含拒绝关键词）
-    2. 用户主动要求转人工（说"转人工"）
-    3. 置信度低（confidence < 0.5）
+    2. 置信度低（confidence < 0.5）
+    3. 敏感问题
+
+    注意：会话快照在 web/app.py 中生成（因为 interrupt 后节点无法写入 state）
 
     Args:
         state: 当前对话状态
@@ -293,11 +295,10 @@ def hitl_checker_node(state: State) -> dict:
     if result["needs_human"]:
         print(f"[HITL] 需要人工介入，原因：{result['reason']}")
         # 调用 interrupt() 暂停图执行，等待人工输入
-        # interrupt() 会返回人工审核后的内容
+        # interrupt() 返回后，图正常返回（不抛异常），web 层检测 hitl_required
         from langgraph.types import interrupt
         human_response = interrupt({
             "reason": result["reason"],
-            "original_answer": answer,
             "message": f"您的问题需要人工客服处理（原因：{result['reason']}）"
         })
 
