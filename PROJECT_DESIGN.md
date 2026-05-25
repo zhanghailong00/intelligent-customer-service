@@ -310,36 +310,57 @@ LLM 结合检索结果 + 对话历史 → 生成回答
 
 ### 6.5 HITL 人工审核
 
-当 Agent 无法确定回答或涉及敏感操作时，触发人工审核：
+当 AI 无法独立完成任务时，自动转交人工客服处理。
 
+**状态图变化**：
 ```
-Agent 判断需要人工介入
-    ↓
-LangGraph interrupt 机制暂停
-    ↓
-通知人工审核员（企业微信/后台）
-    ↓
-审核员确认/修改回答
-    ↓
-继续执行流程
+现在：
+classifier → agent → end
+
+加 HITL 后：
+classifier → agent → hitl_checker →
+  ├── 不需要人工 → end
+  └── 需要人工 → interrupt（暂停）→ 等待人工输入 → end
 ```
+
+**触发场景**：
+
+| 优先级 | 场景 | 触发条件 | 实现方式 |
+|--------|------|---------|---------|
+| 必做 | Agent 无法回答 | 回复包含"我不确定"/"建议联系技术支持" | 关键词匹配 |
+| 必做 | 用户主动要求 | "转人工"/"找客服"/"人工客服" | 关键词匹配 |
+| 必做 | 置信度低 | `confidence < 0.5` | 阈值判断 |
+| 可选 | 敏感问题 | 退款/投诉/法律/赔偿 | 关键词匹配 |
+| 可选 | 情绪波动 | 愤怒/不满 | 情感分析（LLM 或规则） |
+| 可选 | 重复提问 | 同一问题问了 3 次以上 | 计数器 |
 
 ---
 
 ## 七、LangGraph 状态定义
 
 ```python
-from typing import TypedDict, Annotated
+from typing import TypedDict, Annotated, List
 from langgraph.graph import add_messages
 
 class State(TypedDict):
-    messages: Annotated[list, add_messages]   # 对话历史
-    type: str                                  # 意图分类结果
-    phase: str                                 # 当前阶段（dispatch/gather/done）
-    query_rewrite: str                         # 改写后的查询
-    retrieved_docs: list                       # 检索到的文档
-    images: list                               # 相关图片路径
-    hitl_required: bool                        # 是否需要人工审核
+    # 对话历史（LangGraph 自动管理）
+    messages: Annotated[list, add_messages]
+
+    # 意图分类结果（classifier 节点写入）
+    intent: str          # product/fault/training/greeting/unknown
+    confidence: float    # 0.0 - 1.0
+
+    # Agent 身份名称（classifier 节点写入，用于 UI 显示）
+    role_name: str       # 产品专家/技术支持/培训顾问
+
+    # 生成的回答（agent 节点或 greeting/unknown 节点写入）
+    answer: str
+
+    # 参考来源（agent 节点写入）
+    sources: List[str]
+
+    # 是否需要人工介入（hitl_checker 节点写入）
+    hitl_required: bool
 ```
 
 ---
@@ -355,9 +376,11 @@ class State(TypedDict):
 4. **每天要有可见产出** — 保持动力，方便调整方向
 
 **关键决策**：
-- 初期用**规则路由**而非 LLM 意图分类（简单、可控、无延迟）
-- 初期用**内存存储**对话历史（SQLite 增加复杂度，初期用户少）
-- **LangGraph** 仅在需要复杂状态流转或人工介入时引入
+- 已完成：LLM 意图分类（比规则更灵活）
+- 已完成：LangGraph 状态图驱动路由（比 if-else 更可维护）
+- 已完成：内存存储对话历史（Gradio + LangGraph State）
+- 进行中：HITL 人工介入（LangGraph interrupt）
+- 待做：查询重写（有评估才能衡量效果）
 
 ---
 
@@ -499,28 +522,35 @@ class State(TypedDict):
 
 ### Phase 5：HITL 机制（第 29-35 天）
 
-**目标**：复杂问题能转人工
+**目标**：AI 无法处理时自动转人工
+
+**实现方案**：基于 LangGraph interrupt 的 HITL
 
 ```
-├── 5.1 设计 HITL 触发规则（多维度检测）
-├── 5.2 实现低置信度检测（confidence < 阈值）
-├── 5.3 实现 Agent 拒绝检测（回复包含"我不确定"等）
-├── 5.4 实现用户主动要求转人工（关键词匹配："转人工"、"找客服"）
-├── 5.5 实现 LangGraph interrupt 机制（暂停 → 通知 → 恢复）
-├── 5.6 Gradio 界面支持人工审核标记
-└── 5.7 测试：准备 10 个复杂问题，验证转人工准确性
+├── 5.1 实现 hitl_checker 节点（核心检测逻辑）
+│   ├── 5.1.1 Agent 拒绝检测（关键词匹配）
+│   ├── 5.1.2 用户主动转人工检测（关键词匹配）
+│   ├── 5.1.3 置信度检测（阈值判断）
+│   └── 5.1.4 敏感问题检测（关键词匹配，可选）
+├── 5.2 集成 LangGraph interrupt 机制
+│   ├── 5.2.1 hitl_checker 调用 interrupt() 暂停图执行
+│   ├── 5.2.2 MemorySaver 持久化状态
+│   └── 5.2.3 人工输入后恢复图执行
+├── 5.3 Gradio 界面适配
+│   ├── 5.3.1 显示"转人工"提示
+│   └── 5.3.2 模拟人工审核按钮
+└── 5.4 测试：准备 10 个触发 HITL 的问题
 
 交付物：基于 LangGraph interrupt 的 HITL 系统
 ```
 
-**HITL 触发条件**：
+**技术方案**：
 
-| 触发条件 | 检测方式 | 示例 |
-|---------|---------|------|
-| 意图分类置信度低 | confidence < 0.5 | "这个问题很奇怪" → 置信度 30% |
-| Agent 明确拒绝 | 回复包含"我不确定"/"建议联系技术支持" | 知识库没有相关内容 |
-| 用户主动要求 | 关键词匹配："转人工"/"找客服"/"人工客服" | 用户对回答不满意 |
-| 负面情绪（后续优化） | 情感分析 | "你们这什么破设备" |
+| 组件 | 实现 |
+|------|------|
+| 触发检测 | hitl_checker 节点，检查 3 个必做条件 |
+| 图暂停/恢复 | LangGraph `interrupt()` + `MemorySaver` |
+| Gradio 交互 | 显示"转人工"提示，模拟审核按钮 |
 
 **验证标准**：
 - 能识别出不确定的回答
@@ -612,15 +642,15 @@ class State(TypedDict):
 | Phase 0 | 第 1-2 天 | ✅ 完成 | API 调通 demo |
 | Phase 1 | 第 3-7 天 | ✅ 完成 | 单 Agent RAG + 增量同步 |
 | Phase 2 | 第 8-14 天 | ✅ 完成 | 多 Agent 路由 + Prompt 优化 |
-| Phase 3 | 第 15-21 天 |   下一步 | LangGraph 集成 + 对话记忆 |
+| Phase 3 | 第 15-21 天 | ✅ 完成 | LangGraph 集成 + 对话记忆 |
 | Phase 4 | 第 22-28 天 |   待开始 | 查询重写优化 |
-| Phase 5 | 第 29-35 天 |   待开始 | HITL 机制（LangGraph interrupt） |
+| Phase 5 | 第 29-35 天 |   下一步 | HITL 机制（LangGraph interrupt） |
 | Phase 6 | 第 36-42 天 |   待开始 | 知识库后台 |
 | Phase 7 | 第 43-49 天 |   待开始 | 部署上线 |
 
 **总计**：约 7 周（50 天）
 
-**当前进度**：Phase 0-2 已完成，下一步是 Phase 3（LangGraph 集成 + 对话记忆）
+**当前进度**：Phase 0-3 已完成，下一步是 Phase 5（HITL 人工介入）
 
 ---
 
