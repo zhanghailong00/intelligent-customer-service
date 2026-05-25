@@ -16,7 +16,7 @@ LangGraph 节点函数
 - hitl_checker_node: 检测是否需要人工介入
 """
 from app.graph.state import State
-from app.graph.hitl.detector import should_escalate_to_human
+from app.hitl.detector import should_escalate_to_human, check_system_control
 from app.llm.intent_classifier import (
     classify_intent,
     get_intent_label,
@@ -54,10 +54,12 @@ def classifier_node(state: State) -> dict:
     意图分类节点
 
     功能：
-    - 接收用户最新的消息
-    - 调用 LLM 意图分类器
+    - 前置检测：系统控制意图（转人工、投诉、售后），优先级最高
+    - 调用 LLM 意图分类器（仅在未命中系统控制意图时）
     - 设置 intent、confidence、role_name
     - greeting 和 unknown 意图直接设置 answer（不走 Agent）
+
+    设计：前置规则检测 + 后置兜底检测（双层 HITL）
 
     Args:
         state: 当前对话状态
@@ -90,6 +92,22 @@ def classifier_node(state: State) -> dict:
             "hitl_required": False
         }
 
+    # ========== 前置检测：系统控制意图（规则匹配，不走 LLM） ==========
+    # 转人工、投诉、售后等系统控制意图优先级最高
+    # 不经过业务分类器，直接拦截返回
+    system_control = check_system_control(user_message)
+    if system_control["is_system_control"]:
+        print(f"[LangGraph] 前置检测命中系统控制意图：{system_control['type']}")
+        return {
+            "intent": INTENT_UNKNOWN,
+            "confidence": 1.0,
+            "role_name": "",
+            "answer": system_control["message"],
+            "sources": [],
+            "hitl_required": True
+        }
+
+    # ========== 正常流程：LLM 意图分类（仅在未命中系统控制意图时） ==========
     # 调用意图分类器
     intent_result = classify_intent(user_message)
     intent = intent_result["intent"]

@@ -3,13 +3,13 @@ HITL（Human-in-the-Loop）检测模块
 
 功能：
 - 检测是否需要人工介入
-- 三种必做检测：Agent 拒绝、用户主动要求、置信度低
-- 两种可选检测：敏感问题、情绪波动（后续扩展）
+- 前置检测：系统控制意图（转人工、投诉等），在路由前拦截
+- 后置检测：Agent 失败兜底（拒绝回答、低置信度等）
 
 设计思路：
-- 检测逻辑独立成模块，便于维护和扩展
-- 每个检测函数返回 bool，hitl_checker 综合判断
-- 关键词匹配为主，简单高效，零成本
+- 双层 HITL 架构：前置规则检测 + 后置兜底检测
+- 前置检测：规则匹配，毫秒级响应，不消耗 LLM token
+- 后置检测：Agent 执行完后兜底，处理 RAG 召回低、Agent 拒绝等场景
 """
 from typing import List
 
@@ -41,9 +41,10 @@ HUMAN_REQUEST_KEYWORDS = [
     "真人服务",
 ]
 
-# 敏感问题关键词：涉及退款、投诉、法律等（可选检测）
+# 敏感问题关键词：涉及退款、投诉、法律等
 SENSITIVE_KEYWORDS = [
     "退款",
+    "退货",
     "投诉",
     "法律",
     "赔偿",
@@ -51,7 +52,57 @@ SENSITIVE_KEYWORDS = [
     "工商",
     "消费者权益",
     "三包",
+]
+
+# ==================== 前置检测：系统控制意图 ====================
+# 系统控制意图：优先级最高，在路由前拦截
+# 不走 LLM 分类，规则匹配即可（确定性强、速度快、零成本）
+
+# 转人工意图关键词（覆盖常见口语化表达）
+HANDOFF_KEYWORDS = [
+    "转人工",
+    "找客服",
+    "人工客服",
+    "人工服务",
+    "转接人工",
+    "找人工",
+    "真人客服",
+    "真人服务",
+    "接人工",
+    "帮我转",
+    "我要人工",
+    "和真人聊",
+    "和人聊",
+    "不想和机器人",
+    "不要机器人",
+]
+
+# 投诉/维权意图关键词
+COMPLAINT_KEYWORDS = [
+    "投诉",
+    "我要投诉",
+    "找你们领导",
+    "找领导",
+    "负责人",
+    "上级",
+    "管理层",
+    "消协",
+    "工商局",
+    "消费者协会",
+    "12315",
+]
+
+# 售后/退款意图关键词（可能需要人工处理）
+AFTERSALE_KEYWORDS = [
+    "退款",
     "退货",
+    "换货",
+    "赔偿",
+    "三包",
+    "维权",
+    "法律",
+    "起诉",
+    "律师",
 ]
 
 
@@ -129,7 +180,7 @@ def check_low_confidence(confidence: float, threshold: float = 0.5) -> bool:
 
 def check_sensitive_content(query: str) -> bool:
     """
-    检测是否包含敏感内容（可选检测）
+    检测是否包含敏感内容
 
     Args:
         query: 用户的问题
@@ -142,6 +193,62 @@ def check_sensitive_content(query: str) -> bool:
             print(f"[HITL] 检测到敏感关键词：{keyword}")
             return True
     return False
+
+
+# ==================== 前置检测函数 ====================
+
+def check_system_control(query: str) -> dict:
+    """
+    前置检测：系统控制意图（转人工、投诉、售后维权）
+
+    在意图分类之前执行，优先级最高。
+    规则匹配，不走 LLM，毫秒级响应。
+
+    Args:
+        query: 用户的原始问题
+
+    Returns:
+        {
+            "is_system_control": True/False,
+            "type": "handoff"/"complaint"/"aftersale"/None,
+            "message": "给用户的提示信息"
+        }
+    """
+    # 检测转人工意图
+    for keyword in HANDOFF_KEYWORDS:
+        if keyword in query:
+            print(f"[HITL 前置] 检测到转人工意图：{keyword}")
+            return {
+                "is_system_control": True,
+                "type": "handoff",
+                "message": "正在为您转接人工客服，请稍候...\n\n请描述您的问题，人工客服将为您处理。"
+            }
+
+    # 检测投诉/维权意图
+    for keyword in COMPLAINT_KEYWORDS:
+        if keyword in query:
+            print(f"[HITL 前置] 检测到投诉意图：{keyword}")
+            return {
+                "is_system_control": True,
+                "type": "complaint",
+                "message": "收到您的投诉/反馈，已为您转接人工客服。\n\n请描述具体问题，我们将尽快为您处理。"
+            }
+
+    # 检测售后/退款意图
+    for keyword in AFTERSALE_KEYWORDS:
+        if keyword in query:
+            print(f"[HITL 前置] 检测到售后意图：{keyword}")
+            return {
+                "is_system_control": True,
+                "type": "aftersale",
+                "message": "您的售后问题需要人工客服处理。\n\n已为您转接人工客服，请描述具体问题。"
+            }
+
+    return {
+        "is_system_control": False,
+        "type": None,
+        "message": ""
+    }
 
 
 # ==================== 综合判断 ====================
@@ -188,8 +295,8 @@ def should_escalate_to_human(
     if check_low_confidence(confidence):
         return {"needs_human": True, "reason": "置信度低"}
 
-    # 可选检测：敏感问题（后续启用）
-    # if check_sensitive_content(user_query):
-    #     return {"needs_human": True, "reason": "敏感问题"}
+    # 必做检测 4：敏感问题
+    if check_sensitive_content(user_query):
+        return {"needs_human": True, "reason": "敏感问题"}
 
     return {"needs_human": False, "reason": "无"}
