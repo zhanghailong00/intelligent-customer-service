@@ -6,10 +6,12 @@ Agent 基类
 - 共享同一个 RAG 检索（同一个 ChromaDB）
 - 调用同一个 LLM 生成回答（支持 Fallback）
 - 支持对话历史（messages），实现多轮对话记忆
+- 支持查询改写（Query Rewriting），提升检索质量
 """
 from typing import Dict, List, Optional
 from app.llm.models import chat
 from app.rag.retriever import retrieve, retrieve_with_context
+from app.query.rewriter import rewrite_query
 
 # 对话历史保留的最大条数（避免 token 溢出）
 MAX_HISTORY_LENGTH = 10
@@ -33,10 +35,16 @@ class BaseAgent:
 
     def run(self, user_query: str, messages: list = None, top_k: int = 3) -> Dict[str, any]:
         """
-        执行 Agent 逻辑：检索 + 生成
+        执行 Agent 逻辑：查询改写 + 检索 + 生成
+
+        流程：
+        1. 查询改写：将用户问题改写为更适合检索的形式
+        2. 向量检索：用改写后的 query 检索知识库
+        3. 构建上下文：格式化检索结果
+        4. LLM 生成：用原始 query + 上下文生成回答
 
         Args:
-            user_query: 用户的问题
+            user_query: 用户的问题（原始 query）
             messages: 对话历史（LangGraph State 中的 messages 列表）
             top_k: 检索返回的文档数量
 
@@ -46,19 +54,23 @@ class BaseAgent:
             - sources: 参考来源列表
             - intent: Agent 的意图类型
         """
-        # 1. 从知识库检索相关内容
-        retrieval_results = retrieve(user_query, top_k=top_k, include_scores=False)
+        # 1. 查询改写（提升检索质量）
+        # 改写后 query 只用于检索，其他环节保持原始 query
+        rewritten_query = rewrite_query(user_query, self.role_name)
 
-        # 2. 构建上下文
+        # 2. 从知识库检索相关内容（用改写后的 query）
+        retrieval_results = retrieve(rewritten_query, top_k=top_k, include_scores=False)
+
+        # 3. 构建上下文
         context = self._build_context(retrieval_results)
 
-        # 3. 构建消息列表（包含对话历史）
+        # 4. 构建消息列表（用原始 query，保持用户视角）
         llm_messages = self._build_messages(user_query, context, messages)
 
-        # 4. 调用 LLM 生成回答
+        # 5. 调用 LLM 生成回答
         answer = chat(llm_messages)
 
-        # 5. 提取参考来源
+        # 6. 提取参考来源
         sources = [r["metadata"].get("source", "") for r in retrieval_results]
 
         return {
