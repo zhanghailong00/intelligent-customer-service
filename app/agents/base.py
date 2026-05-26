@@ -7,6 +7,7 @@ Agent 基类
 - 调用同一个 LLM 生成回答（支持 Fallback）
 - 支持对话历史（messages），实现多轮对话记忆
 - 支持查询改写（Query Rewriting），提升检索质量
+- 两步检索：原始 query + 改写后 query，合并去重
 """
 from typing import Dict, List, Optional
 from app.llm.models import chat
@@ -35,11 +36,11 @@ class BaseAgent:
 
     def run(self, user_query: str, messages: list = None, top_k: int = 3) -> Dict[str, any]:
         """
-        执行 Agent 逻辑：查询改写 + 检索 + 生成
+        执行 Agent 逻辑：查询改写 + 两步检索 + 生成
 
         流程：
-        1. 查询改写：将用户问题改写为更适合检索的形式
-        2. 向量检索：用改写后的 query 检索知识库
+        1. 查询改写：基于历史对话，将用户问题改写为更适合检索的形式
+        2. 两步检索：用原始 query 和改写后 query 分别检索，合并去重
         3. 构建上下文：格式化检索结果
         4. LLM 生成：用原始 query + 上下文生成回答
 
@@ -54,12 +55,11 @@ class BaseAgent:
             - sources: 参考来源列表
             - intent: Agent 的意图类型
         """
-        # 1. 查询改写（提升检索质量）
-        # 改写后 query 只用于检索，其他环节保持原始 query
-        rewritten_query = rewrite_query(user_query, self.role_name)
+        # 1. 查询改写（基于历史对话上下文）
+        rewritten_query = rewrite_query(user_query, self.role_name, messages)
 
-        # 2. 从知识库检索相关内容（用改写后的 query）
-        retrieval_results = retrieve(rewritten_query, top_k=top_k, include_scores=False)
+        # 2. 两步检索：原始 query + 改写后 query，合并去重
+        retrieval_results = self._two_step_retrieve(user_query, rewritten_query, top_k)
 
         # 3. 构建上下文
         context = self._build_context(retrieval_results)
@@ -78,6 +78,56 @@ class BaseAgent:
             "sources": sources,
             "intent": self.name
         }
+
+    def _two_step_retrieve(self, original_query: str, rewritten_query: str, top_k: int) -> List[Dict]:
+        """
+        两步检索：原始 query + 改写后 query，合并去重
+
+        流程：
+        1. 用原始 query 检索
+        2. 用改写后 query 检索
+        3. 合并两组结果，按 source 去重，返回 top_k 条
+
+        Args:
+            original_query: 原始用户问题
+            rewritten_query: 改写后的问题
+            top_k: 最终返回的文档数量
+
+        Returns:
+            合并去重后的检索结果列表
+        """
+        print(f"[Agent] 两步检索开始")
+        print(f"[Agent] 原始 query：{original_query}")
+        print(f"[Agent] 改写后 query：{rewritten_query}")
+
+        # Step 1: 用原始 query 检索
+        results_original = retrieve(original_query, top_k=top_k, include_scores=True)
+        print(f"[Agent] 原始 query 检索到 {len(results_original)} 条结果")
+
+        # Step 2: 用改写后 query 检索
+        results_rewritten = retrieve(rewritten_query, top_k=top_k, include_scores=True)
+        print(f"[Agent] 改写后 query 检索到 {len(results_rewritten)} 条结果")
+
+        # Step 3: 合并去重（按 source 字段去重，保留分数高的）
+        merged = {}
+        for r in results_original + results_rewritten:
+            source = r["metadata"].get("source", "")
+            score = r.get("score", 0)
+            # 如果 source 已存在，保留分数高的
+            if source not in merged or score > merged[source].get("score", 0):
+                merged[source] = r
+
+        # 按分数排序，取 top_k
+        merged_list = sorted(merged.values(), key=lambda x: x.get("score", 0), reverse=True)
+        final_results = merged_list[:top_k]
+
+        print(f"[Agent] 合并去重后：{len(merged)} 条，取 top {top_k}：{len(final_results)} 条")
+
+        # 移除 score 字段（后续不需要）
+        for r in final_results:
+            r.pop("score", None)
+
+        return final_results
 
     def _build_messages(self, user_query: str, context: str, messages: list = None) -> list:
         """

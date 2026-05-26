@@ -1,4 +1,4 @@
-# 面试亮点：Query Rewriting 查询改写
+# 面试亮点：Query Rewriting 查询改写（v2）
 
 ---
 
@@ -13,10 +13,24 @@
 | "不亮了" | 缺少主语，不知道是什么不亮 |
 | "怎么搭" | 省略了宾语，不知道搭什么 |
 | "那个报错" | 模糊指代，不知道具体报错信息 |
+| "怎么修"（第2轮） | 省略主语，不知道修什么 |
+| "实验平台怎么登陆" | 错别字"登陆"应为"登录" |
 
-### 1.2 目标
+### 1.2 多轮对话的问题
 
-在 RAG 检索前，用 LLM 将用户问题改写为更适合检索的形式，提升召回率。
+客服场景中，后续问题经常省略主语或用代词：
+
+```
+第 1 轮：用户问 "传感器不亮了"
+第 2 轮：用户问 "怎么修"  ← 不知道修什么
+第 3 轮：用户问 "多少钱"  ← 不知道什么的钱
+```
+
+### 1.3 目标
+
+1. 基于历史对话上下文改写用户问题
+2. 两步检索提升召回率和鲁棒性
+3. 降级机制保证系统稳定性
 
 ---
 
@@ -31,7 +45,11 @@
 | Query 分解 | ⭐⭐⭐⭐⭐ | 很高 | 很高 | 不需要 |
 | 规则改写 | ⭐⭐ | 低 | 无 | 效果不够 |
 
-选择 LLM 改写的理由：项目已有 DeepSeek API，实现简单，效果好。
+**选择 LLM 改写的理由**：
+1. 项目已有 DeepSeek API，不需要额外依赖
+2. 语义理解能力强，改写质量高
+3. 实现简单，一个函数 + prompt
+4. 可以处理错别字、同义转换、上下文补充
 
 ### 2.2 作用范围设计
 
@@ -41,9 +59,10 @@
 classifier_node（意图分类）  ← 用原始 query，不改写
     ↓
 Agent 节点
-    ├── rewrite_query()      ← 这里改写
-    ├── retrieve(rewritten)  ← 用改写后 query 检索
-    └── chat(original)       ← 用原始 query 生成回答
+    ├── rewrite_query(query, role, history)  ← 基于历史改写
+    ├── retrieve(original)  ──┐
+    │                         ├──→ 合并去重 → 结果
+    └── retrieve(rewritten) ──┘
     ↓
 hitl_checker_node（HITL 检测）← 用原始 query，不改写
 ```
@@ -54,15 +73,67 @@ hitl_checker_node（HITL 检测）← 用原始 query，不改写
 - HITL 关键词匹配依赖原始表述（"转人工"不能改写为"用户想要转接人工客服"）
 - 改写会增加不必要的开销
 
-### 2.3 角色感知改写
+### 2.3 历史感知改写
 
-不同 Agent 有不同的改写上下文：
+**为什么需要历史？**
 
-| Agent | 角色 | 改写方向 |
-|-------|------|---------|
-| ProductAgent | 产品专家 | 补充产品名称、型号、功能参数 |
-| FaultAgent | 故障排查 | 补充故障现象、设备名称、错误信息 |
-| TrainingAgent | 培训指导 | 补充实验名称、课程内容 |
+| 场景 | 无历史 | 有历史 |
+|------|--------|--------|
+| "怎么修"（历史：传感器不亮） | 改写可能猜错 | ✅ 改写为"传感器不亮怎么维修" |
+| "光照的呢"（历史：问过温湿度参数） | 不知道"的"指什么 | ✅ 改写为"光照传感器的参数是多少" |
+| 独立完整问题 | 无影响 | 无影响 |
+
+**历史取几轮？** 最近 3 轮（用户+助手各算一条），够用且不过度消耗 token。
+
+**历史格式化支持**：
+- LangChain 消息对象（HumanMessage/AIMessage）
+- 字典格式（{"role": "user", "content": "..."}）
+- LangChain v0.2+ 的 content 列表格式（[{"type": "text", "text": "..."}]）
+
+### 2.4 两步检索
+
+**为什么需要两步？**
+
+```
+原始 query ─────→ 检索 1 ──┐
+                              ├──→ 合并去重 → 更全面的结果
+改写后 query ───→ 检索 2 ──┘
+```
+
+| 方面 | 单步检索 | 两步检索 |
+|------|---------|---------|
+| 召回率 | 一般 | 更高 |
+| 鲁棒性 | 改写错就全错 | 原始 query 兜底 |
+| 延迟 | 低 | +1-2秒 |
+
+**合并策略**：按 source 去重，保留分数高的结果。
+
+**优势**：
+- 召回率更高：两种 query 覆盖不同角度
+- 更鲁棒：改写失败时，原始 query 仍然有效
+- 互补：原始 query 可能命中精确匹配，改写后 query 命中语义匹配
+
+### 2.5 降级机制
+
+**问题**：LLM 调用失败时，不能影响系统稳定性。
+
+**解决方案**：改写失败时返回原始 query。
+
+```python
+try:
+    response = chat(...)  # 调用 LLM 改写
+    return response.strip()
+except:
+    return query  # 降级：返回原始 query
+```
+
+**降级场景**：
+- LLM API 超时
+- LLM API 返回错误
+- 改写结果为空
+- 网络异常
+
+**效果**：改写失败 → 用原始 query → 检索质量和改写前一样，不影响系统稳定性。
 
 ---
 
@@ -73,50 +144,53 @@ hitl_checker_node（HITL 检测）← 用原始 query，不改写
 ```
 app/query/
 ├── __init__.py
-└── rewriter.py  # 查询改写模块
+└── rewriter.py  # 历史感知查询改写模块
 ```
 
 ### 3.2 核心代码
 
 ```python
-REWRITE_PROMPT = """你是一个查询优化专家。请将用户问题改写为更适合知识库检索的形式。
+REWRITE_PROMPT = """你是一个查询优化专家。
 
 当前场景：{context}
+对话历史：
+{history}
 
 改写要求：
-1. 补充缺失的上下文（设备名称、场景等）
-2. 消除代词和模糊指代
-3. 扩展关键词，让问题更具体
-4. 保持原意，不要改变问题方向
-5. 输出改写后的问题，不要解释
+1. 参考对话历史，理解当前问题的上下文
+2. 如果当前问题包含代词或省略了主语，根据历史补充完整
+3. 补充缺失的上下文
+4. 保持原意
 
 用户问题：{query}
 改写后："""
 
-def rewrite_query(query: str, context: str = "") -> str:
-    """查询改写，失败时返回原始 query"""
-    try:
-        response = chat(messages=[...], temperature=0.3)
-        return response.strip()
-    except:
-        return query  # 降级
+def rewrite_query(query: str, context: str = "", history: list = None) -> str:
+    history_text = _format_history(history)  # 格式化最近 3 轮
+    response = chat(messages=[...], temperature=0.3)
+    return response.strip()
+
+def _format_history(messages: list, max_turns: int = 3) -> str:
+    # 支持多种消息格式
+    # 截断过长内容
+    pass
 ```
 
-### 3.3 调用位置
+### 3.3 两步检索
 
 ```python
-# app/agents/base.py
-def run(self, user_query, messages=None, top_k=3):
-    # 1. 查询改写
-    rewritten_query = rewrite_query(user_query, self.role_name)
-
-    # 2. 用改写后 query 检索
-    retrieval_results = retrieve(rewritten_query, top_k=top_k)
-
-    # 3. 后续用原始 query
-    context = self._build_context(retrieval_results)
-    llm_messages = self._build_messages(user_query, context, messages)
-    answer = chat(llm_messages)
+def _two_step_retrieve(self, original_query, rewritten_query, top_k):
+    # 原始 query 检索
+    results_original = retrieve(original_query, top_k=top_k)
+    # 改写后 query 检索
+    results_rewritten = retrieve(rewritten_query, top_k=top_k)
+    # 合并去重（按 source 去重，保留分数高的）
+    merged = {}
+    for r in results_original + results_rewritten:
+        source = r["metadata"].get("source", "")
+        if source not in merged or r.get("score", 0) > merged[source].get("score", 0):
+            merged[source] = r
+    return sorted(merged.values(), key=lambda x: x.get("score", 0), reverse=True)[:top_k]
 ```
 
 ---
@@ -125,23 +199,39 @@ def run(self, user_query, messages=None, top_k=3):
 
 ### 4.1 项目描述
 
-> "RAG 系统的一个常见问题是用户表述模糊，直接检索效果差。我实现了 Query Rewriting 模块，用 LLM 在检索前改写用户问题，补充上下文、消除歧义。改写只用于检索，不影响意图识别和 HITL 检测。"
+> "RAG 系统有三个痛点：用户表述模糊、多轮对话省略主语、改写失败影响系统。我实现了历史感知的 Query Rewriting，基于最近 3 轮对话理解上下文，改写用户问题。同时采用两步检索——原始 query 和改写后 query 分别检索后合并去重，提升召回率和鲁棒性。改写失败时有降级机制，返回原始 query，不影响系统稳定性。"
 
 ### 4.2 技术细节
 
-> "改写 Prompt 设计了四个要求：补充上下文、消除指代、扩展关键词、保持原意。不同 Agent 有不同的改写上下文——产品 Agent 补充型号参数，故障 Agent 补充故障现象。改写失败时有降级机制，返回原始 query，不影响系统稳定性。"
+> "改写时传入对话历史，让 LLM 理解'怎么修'指的是之前提到的'传感器'。两步检索的好处是：改写错了还有原始 query 兜底，改写对了能召回更多相关文档。合并策略是按文档来源去重，保留相似度分数高的结果。降级机制确保 LLM 调用失败时，系统仍能正常工作。"
 
 ### 4.3 延伸讨论
 
 | 面试官可能问 | 可以聊的方向 |
 |-------------|-------------|
 | 改写效果怎么评估？ | 对比改写前后的检索召回率、回答准确率 |
+| 两步检索延迟怎么优化？ | 并行检索、缓存常见改写 |
 | 为什么不只用 HyDE？ | HyDE 适合答案格式固定的场景，LLM 改写更通用 |
-| 改写延迟怎么优化？ | 可以缓存常见改写、用更小的模型 |
-| 改写失败怎么办？ | 降级机制，返回原始 query |
+| 改写失败怎么办？ | 降级机制，返回原始 query，不影响系统 |
+| 历史取几轮合适？ | 3 轮够用，太多会消耗 token 且引入噪声 |
+| 两步检索的合并策略？ | 按 source 去重，保留分数高的，简单有效 |
+| 为什么不用加权重？ | 简单场景下权重调参复杂，收益不明显 |
 
 ---
 
-## 五、一句话总结
+## 五、核心要点总结
 
-> "LLM 在检索前改写用户问题，补充上下文、消除歧义，提升 RAG 召回率，改写失败时优雅降级。"
+| 要点 | 说明 |
+|------|------|
+| **历史感知** | 基于对话历史理解多轮上下文，解决代词和省略主语问题 |
+| **两步检索** | 原始 query + 改写后 query 分别检索，合并去重，提升召回率和鲁棒性 |
+| **降级机制** | 改写失败时用原始 query，不影响系统稳定性 |
+| **作用范围** | 改写只用于检索，不影响意图识别和 HITL 检测 |
+| **多格式兼容** | 支持 LangChain 消息对象、字典格式、content 列表格式 |
+| **角色感知** | 不同 Agent 有不同的改写上下文 |
+
+---
+
+## 六、一句话总结
+
+> "基于对话历史改写用户问题，两步检索合并去重，降级机制保证稳定性——完整的 RAG 查询优化方案。"
