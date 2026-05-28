@@ -1,6 +1,6 @@
 # 改动摘要：Phase 5 Step 4 - Gradio 界面适配 HITL
 
-**日期**：2026-05-23
+**日期**：2026-05-25
 **操作人**：Claude
 **任务**：Gradio 界面支持 HITL interrupt 暂停/恢复流程
 

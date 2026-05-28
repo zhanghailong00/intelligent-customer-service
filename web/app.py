@@ -1,10 +1,12 @@
 """
 Gradio 界面模块
 提供简单的聊天界面，直接调用 LangGraph 状态图
+支持流式输出：逐 token 显示回答，提升用户体验
 启动命令：python web/app.py
 """
 import os
 import sys
+import time
 
 # 添加项目根目录到 Python 路径
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -22,10 +24,32 @@ from app.hitl.detector import check_agent_refusal, check_low_confidence, check_s
 _pending_interrupt = None
 _hitl_active = False  # HITL 是否激活（人工客服接管中）
 
+# 流式输出配置
+STREAM_DELAY = 0.02  # 每个 token 的延迟（秒），控制打字速度
+
+
+def _stream_response(text: str):
+    """
+    将文本逐 token 输出（生成器函数）
+
+    模拟打字效果，提升用户体验。
+
+    Args:
+        text: 要输出的完整文本
+
+    Yields:
+        逐 token 的文本片段
+    """
+    current = ""
+    for char in text:
+        current += char
+        yield current
+        time.sleep(STREAM_DELAY)
+
 
 def chat(message, history):
     """
-    聊天函数，调用 LangGraph 状态图获取回复
+    聊天函数，调用 LangGraph 状态图获取回复（支持流式输出）
 
     流程：
     1. 如果 HITL 激活中 → 用户输入作为人工客服回复直接显示
@@ -36,8 +60,8 @@ def chat(message, history):
         message: 用户输入的消息
         history: 对话历史（Gradio 自动管理）
 
-    Returns:
-        格式化的回答
+    Yields:
+        逐 token 的回答文本
     """
     global _pending_interrupt, _hitl_active
 
@@ -49,8 +73,10 @@ def chat(message, history):
             if message.strip() in ["关闭", "结束", "退出", "close"]:
                 _hitl_active = False
                 _pending_interrupt = None
-                return "✅ 已退出人工客服模式，AI 客服继续为您服务。"
-            return f"**[人工客服]** {message}"
+                yield "✅ 已退出人工客服模式，AI 客服继续为您服务。"
+                return
+            yield f"**[人工客服]** {message}"
+            return
 
         # 2. 获取 LangGraph 状态图
         graph = get_graph()
@@ -62,7 +88,7 @@ def chat(message, history):
         print(f"[Gradio] 收到消息：{message}")
         print(f"[Gradio] 历史消息数：{len(messages)}")
 
-        # 4. 调用 LangGraph
+        # 4. 调用 LangGraph（同步处理）
         config = {"configurable": {"thread_id": "default"}}
         result = graph.invoke(
             {
@@ -111,16 +137,18 @@ def chat(message, history):
             response += format_snapshot_display(snapshot) + "\n\n"
             response += "请描述您的问题，人工客服将为您处理。\n\n"
             response += "_（人工客服输入「关闭」可退出人工模式，恢复 AI 服务）_"
-            return response
+            yield response
+            return
 
-        # 6. 正常输出
-        return _format_response(result)
+        # 6. 正常输出（流式显示）
+        response = _format_response(result)
+        yield from _stream_response(response)
 
     except Exception as e:
         # 打印完整错误堆栈到终端，方便调试
         print(f"[Gradio] 错误：{type(e).__name__}: {e}")
         traceback.print_exc()
-        return f"错误：{str(e)}\n\n请检查 API 配置是否正确。"
+        yield f"错误：{str(e)}\n\n请检查 API 配置是否正确。"
 
 
 def _format_response(result):
@@ -185,7 +213,7 @@ def _convert_history(history):
     return messages
 
 
-# 创建 Gradio 聊天界面（最简配置，兼容 Gradio 6.x）
+# 创建 Gradio 聊天界面（支持流式输出）
 demo = gr.ChatInterface(
     fn=chat,
     title="实训设备智能客服",
@@ -210,6 +238,6 @@ if __name__ == "__main__":
     # 启动 Gradio 服务
     demo.launch(
         server_name="127.0.0.1",
-        server_port=7860,
+        server_port=7888,
         share=False  # 不生成公网链接，仅本地访问
     )

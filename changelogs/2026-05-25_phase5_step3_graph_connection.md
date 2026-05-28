@@ -1,6 +1,6 @@
 # 改动摘要：Phase 5 Step 3 - 状态图连接 HITL 节点
 
-**日期**：2026-05-23
+**日期**：2026-05-25
 **操作人**：Claude
 **任务**：修改 builder.py，将 Agent 节点连接到 hitl_checker_node
 

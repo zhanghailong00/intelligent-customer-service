@@ -2,9 +2,10 @@
 大语言模型封装模块
 封装 DeepSeek API 调用，提供统一的对话接口
 支持 Fallback 机制：主模型异常时自动切换备用模型
+支持流式输出：逐 token 返回，提升用户体验
 """
 import time
-from typing import Optional
+from typing import Optional, Generator
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from app.config import (
@@ -121,6 +122,64 @@ def chat(messages: list, temperature: float = 0.7) -> str:
             elapsed = time.time() - start_time
             print(f"[LLM] 备用模型 ({QWEN_LLM_MODEL}) 调用成功，耗时: {elapsed:.2f}s")
             return result
+        except Exception as fallback_error:
+            print(f"[LLM] 备用模型 ({QWEN_LLM_MODEL}) 也失败了: {type(fallback_error).__name__}: {fallback_error}")
+            raise Exception(f"主模型和备用模型均调用失败。主模型错误: {e}，备用模型错误: {fallback_error}")
+
+
+def chat_stream(messages: list, temperature: float = 0.7) -> Generator[str, None, None]:
+    """
+    与 LLM 对话（流式输出，支持 Fallback）
+
+    使用 llm.stream() 逐 token 返回，提升用户体验。
+
+    Args:
+        messages: 消息列表，格式为 [{"role": "user/system", "content": "..."}]
+        temperature: 生成温度
+
+    Yields:
+        LLM 生成的 token 文本
+    """
+    # 将字典格式的消息转换为 LangChain 消息对象
+    lc_messages = []
+    for msg in messages:
+        if msg["role"] == "system":
+            lc_messages.append(SystemMessage(content=msg["content"]))
+        elif msg["role"] == "user":
+            lc_messages.append(HumanMessage(content=msg["content"]))
+
+    # 获取主模型
+    primary_llm = get_llm(temperature, provider="primary")
+
+    # 尝试调用主模型（流式）
+    try:
+        start_time = time.time()
+        token_count = 0
+        for chunk in primary_llm.stream(lc_messages):
+            if chunk.content:
+                token_count += 1
+                yield chunk.content
+        elapsed = time.time() - start_time
+        print(f"[LLM] 主模型 ({DEEPSEEK_MODEL}) 流式调用成功，耗时: {elapsed:.2f}s，tokens: {token_count}")
+    except Exception as e:
+        print(f"[LLM] 主模型 ({DEEPSEEK_MODEL}) 流式调用失败: {type(e).__name__}: {e}")
+
+        # 如果未启用 Fallback，直接抛出
+        if not LLM_FALLBACK_ENABLED:
+            raise
+
+        # Fallback 到备用模型
+        print(f"[LLM] 触发 Fallback，切换到备用模型 ({QWEN_LLM_MODEL})...")
+        try:
+            fallback_llm = get_llm(temperature, provider="fallback")
+            start_time = time.time()
+            token_count = 0
+            for chunk in fallback_llm.stream(lc_messages):
+                if chunk.content:
+                    token_count += 1
+                    yield chunk.content
+            elapsed = time.time() - start_time
+            print(f"[LLM] 备用模型 ({QWEN_LLM_MODEL}) 流式调用成功，耗时: {elapsed:.2f}s，tokens: {token_count}")
         except Exception as fallback_error:
             print(f"[LLM] 备用模型 ({QWEN_LLM_MODEL}) 也失败了: {type(fallback_error).__name__}: {fallback_error}")
             raise Exception(f"主模型和备用模型均调用失败。主模型错误: {e}，备用模型错误: {fallback_error}")
