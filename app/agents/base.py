@@ -109,9 +109,15 @@ class BaseAgent:
         print(f"[Agent] 改写后 query 检索到 {len(results_rewritten)} 条结果")
 
         # Step 3: 合并去重（按 source 字段去重，保留分数高的）
+        # 过滤掉 metadata 为 None 的结果（向量数据库可能为空或数据异常）
         merged = {}
         for r in results_original + results_rewritten:
-            source = r["metadata"].get("source", "")
+            # 安全检查：metadata 可能为 None
+            metadata = r.get("metadata")
+            if metadata is None:
+                print(f"[Agent] 警告：跳过 metadata 为空的结果")
+                continue
+            source = metadata.get("source", "")
             score = r.get("score", 0)
             # 如果 source 已存在，保留分数高的
             if source not in merged or score > merged[source].get("score", 0):

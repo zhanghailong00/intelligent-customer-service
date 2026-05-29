@@ -48,10 +48,13 @@ def get_vectorstore():
     """
     获取 ChromaDB 向量数据库实例
 
+    每次调用都重新创建客户端，确保读取磁盘上最新的数据。
+    这样管理后台删除文档后，客服系统能立即感知变化。
+
     Returns:
         ChromaDB Collection 对象
     """
-    # 创建持久化客户端，数据保存在本地磁盘
+    # 每次重新创建客户端，读取磁盘最新数据
     client = chromadb.PersistentClient(path=CHROMA_PERSIST_DIR)
     # 获取或创建集合（类似于数据库中的表）
     return client.get_or_create_collection(name=CHROMA_COLLECTION_NAME)

@@ -509,18 +509,15 @@ def delete_vector_data(record: Dict) -> bool:
             return False
 
         # 构建 source 名称（与 loader.py 中 load_and_split 一致）
-        # source = 相对路径，如 "实验箱前期准备工作\01-实验前准备和结束收纳\01-实验前准备和结束收纳.md"
+        # source = 相对于 data/processed/ 的路径
+        # 例如："02-实验环境的搭建\02-实验环境的搭建.md"
         pdf_name_no_ext = os.path.splitext(os.path.basename(filename))[0]
-        sub_dir = os.path.dirname(filename)
-        if sub_dir:
-            source = f"{sub_dir}\\{pdf_name_no_ext}\\{pdf_name_no_ext}.md"
-        else:
-            source = f"{pdf_name_no_ext}\\{pdf_name_no_ext}.md"
+        source = f"{pdf_name_no_ext}\\{pdf_name_no_ext}.md"
 
         # 获取向量数据库
         client, collection = get_vectorstore()
 
-        # 删除该 source 的所有向量
+        # 先尝试精确匹配
         initial_count = collection.count()
         collection.delete(where={"source": source})
         final_count = collection.count()
@@ -528,6 +525,19 @@ def delete_vector_data(record: Dict) -> bool:
         deleted_count = initial_count - final_count
         if deleted_count > 0:
             print(f"  [删除] 向量数据：{deleted_count} 个 chunk (source={source})")
+            return True
+
+        # 如果精确匹配失败，尝试模糊匹配（包含文件名）
+        # 获取所有文档，找到 source 包含文件名的
+        all_data = collection.get(include=['metadatas'])
+        ids_to_delete = []
+        for i, meta in enumerate(all_data['metadatas']):
+            if pdf_name_no_ext in meta.get('source', ''):
+                ids_to_delete.append(all_data['ids'][i])
+
+        if ids_to_delete:
+            collection.delete(ids=ids_to_delete)
+            print(f"  [删除] 向量数据：{len(ids_to_delete)} 个 chunk (模糊匹配)")
             return True
 
         return False
