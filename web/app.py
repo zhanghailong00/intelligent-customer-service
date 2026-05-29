@@ -232,7 +232,7 @@ if __name__ == "__main__":
     print("=" * 60)
     print(f"项目根目录：{PROJECT_ROOT}")
     print("启动 Gradio 界面...")
-    print("访问地址：http://localhost:7860")
+    print("访问地址：http://localhost:7888")
     print("=" * 60)
 
     # 启动 Gradio 服务
