@@ -41,8 +41,9 @@ class BaseAgent:
         流程：
         1. 查询改写：基于历史对话，将用户问题改写为更适合检索的形式
         2. 两步检索：用原始 query 和改写后 query 分别检索，合并去重
-        3. 构建上下文：格式化检索结果
-        4. LLM 生成：用原始 query + 上下文生成回答
+        3. 如果检索结果为空，直接返回拒绝回答，不调用 LLM
+        4. 构建上下文：格式化检索结果
+        5. LLM 生成：用原始 query + 上下文生成回答
 
         Args:
             user_query: 用户的问题（原始 query）
@@ -61,16 +62,25 @@ class BaseAgent:
         # 2. 两步检索：原始 query + 改写后 query，合并去重
         retrieval_results = self._two_step_retrieve(user_query, rewritten_query, top_k)
 
-        # 3. 构建上下文
+        # 3. 如果检索结果为空，直接返回拒绝回答，不调用 LLM
+        if not retrieval_results:
+            print(f"[Agent] 检索结果为空，直接返回拒绝回答")
+            return {
+                "answer": f"目前我没有找到相关{self.role_name}资料，建议您联系技术支持确认。",
+                "sources": [],
+                "intent": self.name
+            }
+
+        # 4. 构建上下文
         context = self._build_context(retrieval_results)
 
-        # 4. 构建消息列表（用原始 query，保持用户视角）
+        # 5. 构建消息列表（用原始 query，保持用户视角）
         llm_messages = self._build_messages(user_query, context, messages)
 
-        # 5. 调用 LLM 生成回答
+        # 6. 调用 LLM 生成回答
         answer = chat(llm_messages)
 
-        # 6. 提取参考来源
+        # 7. 提取参考来源
         sources = [r["metadata"].get("source", "") for r in retrieval_results]
 
         return {

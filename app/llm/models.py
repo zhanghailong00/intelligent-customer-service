@@ -25,7 +25,7 @@ from app.config import (
 
 
 def get_llm(
-    temperature: float = 0.7,
+    temperature: float = 0.3,
     provider: str = "primary",
     timeout: Optional[int] = None
 ) -> ChatOpenAI:
@@ -75,7 +75,7 @@ def _call_llm(llm: ChatOpenAI, messages: list) -> str:
     return response.content
 
 
-def chat(messages: list, temperature: float = 0.7) -> str:
+def chat(messages: list, temperature: float = 0.3) -> str:
     """
     与 LLM 对话（支持 Fallback 机制）
 
@@ -127,7 +127,7 @@ def chat(messages: list, temperature: float = 0.7) -> str:
             raise Exception(f"主模型和备用模型均调用失败。主模型错误: {e}，备用模型错误: {fallback_error}")
 
 
-def chat_stream(messages: list, temperature: float = 0.7) -> Generator[str, None, None]:
+def chat_stream(messages: list, temperature: float = 0.3) -> Generator[str, None, None]:
     """
     与 LLM 对话（流式输出，支持 Fallback）
 
@@ -185,7 +185,7 @@ def chat_stream(messages: list, temperature: float = 0.7) -> Generator[str, None
             raise Exception(f"主模型和备用模型均调用失败。主模型错误: {e}，备用模型错误: {fallback_error}")
 
 
-def chat_with_fallback_status(messages: list, temperature: float = 0.7) -> dict:
+def chat_with_fallback_status(messages: list, temperature: float = 0.3) -> dict:
     """
     与 LLM 对话，并返回详细的调用状态
 
